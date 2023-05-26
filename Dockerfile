@@ -8,6 +8,8 @@ ENV \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Documentation
+COPY *.md /
 
 RUN mkdir /usr/app
 WORKDIR /usr/app
@@ -22,10 +24,8 @@ RUN apk add --no-cache gcc g++ linux-headers udev
 
 RUN cd /usr/app && npm install serialport --build-from-source
 
-COPY package.json /usr/app
-COPY index.js /usr/app
-COPY util.js /usr/app
-COPY CustomIO.js /usr/app
+COPY package.json /usr/app/
+COPY *.js /usr/app/
 
 RUN cd /usr/app && npm install --unsafe-perm
 

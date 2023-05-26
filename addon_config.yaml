@@ -1,25 +1,44 @@
 #device: "/dev/tty.usbmodem1432402"
-device: "/dev/tty.usbmodem1432202"
+#device: "/dev/tty.usbmodem1432202"
+#device: "/dev/tty.usbmodem1432201"
+device: "/dev/tty.usbmodem14101"
 baudrate: 115200
 discovery_topic: "homeassistant"
-sensors: []
-switches: []
+
+#switches: []
+binary_sensors:
+  - name: "Détecteur de débit TEST"
+    pin: 11
+    device_class: "running"
+relays:
+  - name: "Test Relay 1"
+    pin: 8
+    type: "NC"
+  - name: "Test Relay 2"
+    pin: 7
+    type: "NO"
+  - name: "Test Relay 3"
+    pin: 6
+    type: "NC"
+    device_class: "switch"
+    domain: "light"
+  - name: "Test Relay 4"
+    pin: 5
+    type: "NO"
+    device_class: "switch"
+  - name: "Thermometers AUTO ON/OFF (TEST)"
+    pin: 13
+    type: "NC"
+    device_class: "switch"
+sensors:
+  - name: "Pression Filtre à Sable TEST"
+    pin: "A0"
+    #threshold: 3
+    freq: 500
+    unit: bar
+    device_class: pressure
 
 thermometers:
-  - name: "Thermometer"
+  - name: "Thermometers AUTO TEST"
     pin: 12
-    controler: "AUTO-DS18B20"
-    #unit: "°C"
-relays:
-  - name: "Relay 1"
-    pin: 5
-    type: "NC"
-  - name: "Relay 2"
-    pin: 6
-    type: "NO"
-  - name: "Relay 3"
-    pin: 7
-    type: "NC"
-  - name: "Relay 4"
-    pin: 8
-    type: "NO"
+    controler: AUTO-DS18B20

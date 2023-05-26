@@ -1,4 +1,5 @@
 class DataTracker {
+
     constructor() {
         this.data = {};
         this.limits = {};
@@ -29,8 +30,8 @@ class DataTracker {
         }
     }
 }
-const tracker = new DataTracker();
-module.exports = tracker;
+
+module.exports = DataTracker;
 
 /*
 const tracker = new DataTracker();

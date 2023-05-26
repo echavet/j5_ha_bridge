@@ -4,14 +4,14 @@ const debug = require('debug')('MQTTSwitch')
 const SLUG = "j5_ha_bridge";
 
 class MQTTSwitch extends Switch {
-    constructor(options, mqttManager, addonconfig, itemConfig) {
+    constructor(options, mqttManager, addonConfig, itemConfig) {
         super(options);
-        this.addonconfig = addonconfig;
+        this.addonConfig = addonConfig;
         this.itemConfig = itemConfig;
         this.mqttClient = mqttManager.mqttClient;
         this.mqttConfig = mqttManager.mqttConfig;
-        this.stateTopic = `${SLUG}/${itemConfig.device_class}/${this.custom.unique_id}/state`;
-
+        //this.stateTopic = `${SLUG}/${itemConfig.device_class}/${this.custom.unique_id}/state`;
+        this.stateTopic = `${SLUG}/binary_sensor/${this.custom.unique_id}/state`;
         // Announce the switch to MQTT Home Assistant discovery
         this.announce();
 
@@ -39,13 +39,13 @@ class MQTTSwitch extends Switch {
                 manufacturer: SLUG
             }
         }
-        debug(`config topic: ${this.addonconfig.discovery_topic}/switch/${this.custom.unique_id}/config`)
+        debug(`config topic: ${this.addonConfig.discovery_topic}/binary_sensor/${this.custom.unique_id}/config`)
         debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSwitchConfig, null, 2)}`)
-        this.mqttClient.publish(`${this.addonconfig.discovery_topic}/switch/${this.custom.unique_id}/config`, JSON.stringify(jsonSwitchConfig), { retain: true });
+        this.mqttClient.publish(`${this.addonConfig.discovery_topic}/binary_sensor/${this.custom.unique_id}/config`, JSON.stringify(jsonSwitchConfig), { retain: true });
     }
 
     updateState(state) {
-        this.mqttClient.publish(`${SLUG}/${this.itemConfig.device_class}/${this.custom.unique_id}/state`, state);
+        this.mqttClient.publish(this.stateTopic, state);
     }
 }
 module.exports = MQTTSwitch;

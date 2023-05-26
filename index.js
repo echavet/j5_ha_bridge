@@ -17,7 +17,7 @@ function main() {
     debug("Retreiving MQTT HA config...");
     util.getMQTTConfig((mqttConfig) => {
       debug("MQTT config:");
-      console.log(mqttConfig);
+      //console.log(mqttConfig);
 
       debug("Connexion au broker MQTT...");
       /** @type {mqtt.MqttClient} */
@@ -52,26 +52,13 @@ function main() {
 
 
 function onMQTTConnected(mqttManager) {
+  debug("MQTT", "Connexion ok");
   debug("main", "Retreiving HA user custom config...");
   //call getconf
   util.getAddonConfig((addonConfig) => {
 
     const board = new Board({
-      io: new CustomIO(addonConfig),
-    });
-
-    board.on('error', (error) => {
-      util.handleError(error);
-    });
-
-    board.on("string", (message) => {
-      debug('STRING: ', `${message}`);
-    });
-
-    board.on('ready', () => {
-      debug("La carte Arduino est prête.");
-      // lecture des objets dans la config de l'addon et annonce mqtt si nécessaire.
-      board.io.setupEntities(mqttManager, addonConfig);
+      io: new CustomIO(addonConfig, mqttManager),
     });
 
   });

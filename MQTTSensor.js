@@ -1,5 +1,7 @@
 const { Sensor } = require('johnny-five');
-const debug = require('debug')('mqtt-sensor');
+const util = require('./util.js');
+const { Console } = require('console');
+const debug = require('debug')('MQTTSensor');
 const SLUG = "j5_ha_bridge";
 
 class MQTTSensor extends Sensor {
@@ -9,15 +11,36 @@ class MQTTSensor extends Sensor {
         this.mqttManager = mqttManager;
         this.addonConfig = addonConfig;
         this.sensorConfig = sensorConfig;
-
+        this.mqttClient = mqttManager.mqttClient;
+        this.mqttConfig = mqttManager.mqttConfig;
+        this.unique_id = `${util.convertWith_(this.sensorConfig.name)}_on_pin_${this.sensorConfig.pin}`;
 
         // Generate a unique MQTT topic for this sensor
-        this.topic = `${SLUG}/sensor/${this.sensorConfig.name}`;
+        this.stateTopic = `${SLUG}/sensor/${this.unique_id}`;
 
+        this.announce();
         // Subscribe to the sensor's change event
         this.on('change', this.handleChange.bind(this));
     }
+    announce() {
+        let jsonSensorConfig = {
+            unique_id: `${this.unique_id}`,
+            name: this.sensorConfig.name,
+            device_class: this.sensorConfig.device_class,
+            state_topic: this.stateTopic,
+            unit_of_measurement: this.sensorConfig.unit,
+            //value_template: '{{ value_json.temperature }}',
+            device: {
+                name: this.sensorConfig.name,
+                identifiers: this.unique_id,
+                manufacturer: SLUG
+            }
+        }
+        debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.custom.unique_id}/config`)
+        debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
+        this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.custom.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
 
+    }
     handleChange() {
 
         let sensorData = this.value;
@@ -29,7 +52,12 @@ class MQTTSensor extends Sensor {
         debug(`Sensor ${this.sensorConfig.name} changed value: ${sensorData}`);
 
         // Publish the new sensor data to MQTT
-        this.mqttManager.mqttClient.publish(this.topic, String(sensorData));
+        if (sensorData != undefined) {
+            this.mqttClient.publish(this.stateTopic, sensorData.toString());
+        } else {
+            Console.log("ATTENTION");
+            debug(`ATTENTION ${this.sensorConfig.name} changed value: ${sensorData}`);
+        }
     }
 }
 

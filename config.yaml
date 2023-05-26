@@ -1,6 +1,6 @@
 name: "J5 Hassio Bridge"
 description: "Bridge to interface arduino's (ConfigurableFirmata) with HAssio via Johnny-Five."
-version: "1.1.13"
+version: "1.1.16"
 slug: "j5_ha_bridge"
 init: false
 arch:
@@ -27,7 +27,7 @@ hassio_role: "default"
 #hassio_api: true
 options:
   baudrate: 115200 # baudrate for serial communication with the board, default is 115200
-  switches: [] # list of switches, default is none
+  binary_sensors: [] # list of binary_sensors, default is none
   relays: [] # list of relays, default is none
   sensors: [] # list of sensors, default is none
   thermometers: [] # list of thermometers, default is none
@@ -37,19 +37,22 @@ schema:
   device: device(subsystem=tty) # device to wich board is connected
   baudrate: list(9600|19200|38400|57600|115200)? # baudrate for serial communication with the board
   discovery_topic: str?
-  switches:
+  binary_sensors:
     - name: str # Specify the name of the switch
       pin: str # Specify the data pin of the switch
-      type: list(NO|NC) # Normally Open or Normally Closed
+      #type: list(NO|NC) # Normally Open or Normally Closed
+      device_class: list(None|battery|battery_charging|carbon_monoxide|cold|connectivity|door|garage_door|gas|heat|light|lock|moisture|motion|moving|occupancy|opening|plug|power|presence|problem|running|safety|smoke|sound|tamper|update|vibration|window)?
   relays:
     - name: str? # Specify the name of the relay
       pin: str # Specify the data pin of the relay
       type: list(NO|NC) # Normally Open or Normally Closed
+      device_class: str?
   sensors:
     - name: str # Specify the name of the sensor
       pin: str # Specify the pin of the sensor
       unit: str # Specify the unit of the sensor
-      device_class: list(battery|current|humidity|pressure|temperature|voltage)?
+      #device_class: list(battery|current|humidity|pressure|temperature|voltage)?
+      device_class: list(None|apparent_power|aqi|atmospheric_pressure|battery|carbon_dioxide|carbon_monoxide|current|data_rate|data_size|date|distance|duration|energy|energy_storage|enum|frequency|gas|humidity|illuminance|irradiance|moisture|monetary|nitrogen_dioxide|nitrogen_monoxide|nitrous_oxide|ozone|pm1|pm25|pm10|power_factor|power|precipitation|precipitation_intensity|pressure|reactive_power|signal_strength|sound_pressure|speed|sulphur_dioxide|temperature|timestamp|volatile_organic_compounds|voltage|volume|volume_storage|water|weight|wind_speed)
       scale_min: float?
       scale_max: float?
       threshold: float?
@@ -60,3 +63,4 @@ schema:
       address: str? # Specify, when the address of the thermometer, should be provided as it is used for unique_id in mqtt topic except for AUTO-DS18B20
       controler: list(ANALOG|LM35|TMP36|DS18B20|MPU6050|GROVE|BMP180|MPL115A2|MPL3115A2|HTU21D|MCP9808|SI7020|SI7021|LSM303C|AUTO-DS18B20) # Specify the type of thermometer
       unit: list('°F'|'K'|'°C')? # Specify the unit of the thermometer, default is "°C"
+      freq: int?

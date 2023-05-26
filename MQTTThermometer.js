@@ -1,7 +1,7 @@
 const { MqttClient } = require('mqtt');
 const { Thermometer } = require('johnny-five');
 const debug = require('debug')('MQTTThermometer')
-const tracker = require('./DataTracker');
+const DataTracker = require('./DataTracker');
 
 const SLUG = "j5_ha_bridge";
 
@@ -15,7 +15,8 @@ class MQTTThermometer extends Thermometer {
         this.mqttConfig = mqttManager.mqttConfig;
         this.stateTopic = `${SLUG}/${itemConfig.device_class}/${this.custom.unique_id}/state`;
         this.lastCelsius = -255;
-        tracker.addVariable(this.custom.unique_id, 8);     // moyennes des 8 dernières mesures        
+        this.tracker = new DataTracker();
+        this.tracker.addVariable(this.custom.unique_id, 8);     // moyennes des 8 dernières mesures        
         // Announce the thermometer to MQTT Home Assistant discovery
         this.announce();
 
@@ -27,9 +28,9 @@ class MQTTThermometer extends Thermometer {
         // Listen for 'change' event and update MQTT state
         this.on("change", () => {
 
-            tracker.push(this.custom.unique_id, this.celsius);
+            this.tracker.push(this.custom.unique_id, this.celsius);
 
-            let celsius = tracker.getAverage(this.custom.unique_id);
+            let celsius = this.tracker.getAverage(this.custom.unique_id);
 
             if (celsius !== null && celsius !== undefined) {
                 celsius = parseFloat(celsius.toFixed(2)); // Arrondi à 1 chiffre après la virgule
@@ -38,6 +39,9 @@ class MQTTThermometer extends Thermometer {
                     this.lastCelsius = celsius;
                 }
             }
+        });
+        this.on("error", (error) => {
+            util.handleError(error);
         });
 
     }
@@ -64,6 +68,7 @@ class MQTTThermometer extends Thermometer {
     }
 
     updateState(celsius) {
+        debug(`sending state for temp sensor ${this.custom.unique_id}: ${celsius.toString()}`);
         this.mqttClient.publish(`${SLUG}/${this.itemConfig.device_class}/${this.custom.unique_id}/state`, celsius.toString());
     }
 

@@ -12,7 +12,7 @@ const token = process.env.SUPERVISOR_TOKEN;
 const CONFIG_API = 'http://supervisor/addons/self/options/config';
 const MQTT_SERVICE_API = 'http://supervisor/services/mqtt';
 
-module.exports = { getAddress, openShell, handleError, detectPort, getAddonConfig, getMQTTConfig, waitForEnterKey, printData };
+module.exports = { getAddress, openShell, handleError, detectPort, getAddonConfig, getMQTTConfig, waitForEnterKey, printData, convertWith_ };
 
 const CONFIGURABLE_FIRMATA_BAUD_RATE = 115200;
 
@@ -50,6 +50,13 @@ async function handleError(error) {
 
     //openShell();
     //waitForEnterKey();
+}
+
+function convertWith_(name) {
+    const noAccent = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const noSpace = noAccent.replace(/\s+/g, "_");
+    const lowerCase = noSpace.toLowerCase();
+    return lowerCase;
 }
 
 function getAddress(device) {

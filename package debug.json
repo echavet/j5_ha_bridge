@@ -4,7 +4,7 @@
     "description": "",
     "main": "index.js",
     "scripts": {
-        "start": "DEBUG=CustomIO*,util* node index.js",
+        "start": "DEBUG=MQTTThermometer*,mqttjs*,main*,CustomIO*,util* node index.js",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "author": "Eric Chavet",
@@ -13,8 +13,7 @@
         "axios": "^1.4.0",
         "debug": "^4.3.4",
         "firmata": "^2.3.0",
-        "johnny-five": "github:echavet/johnny-five#patch-2",
-        "js-yaml": "^4.1.0",
+        "johnny-five": "^2.1.0",
         "mqtt": "^4.3.7",
         "readline": "^1.3.0",
         "serialport": "^8.0.8"
