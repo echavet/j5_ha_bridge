@@ -1,0 +1,25 @@
+#device: "/dev/tty.usbmodem1432402"
+device: "/dev/tty.usbmodem1432202"
+baudrate: 115200
+discovery_topic: "homeassistant"
+sensors: []
+switches: []
+
+thermometers:
+  - name: "Thermometer"
+    pin: 12
+    controler: "AUTO-DS18B20"
+    #unit: "°C"
+relays:
+  - name: "Relay 1"
+    pin: 5
+    type: "NC"
+  - name: "Relay 2"
+    pin: 6
+    type: "NO"
+  - name: "Relay 3"
+    pin: 7
+    type: "NC"
+  - name: "Relay 4"
+    pin: 8
+    type: "NO"

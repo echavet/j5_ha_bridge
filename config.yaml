@@ -1,0 +1,62 @@
+name: "J5 Hassio Bridge"
+description: "Bridge to interface arduino's (ConfigurableFirmata) with HAssio via Johnny-Five."
+version: "1.1.13"
+slug: "j5_ha_bridge"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+devices:
+  - "/dev/ttyACM0:/dev/ttyACM0:rwm"
+  - "/dev/ttyACM1:/dev/ttyACM1:rwm"
+  - "/dev/ttyUSB0:/dev/ttyUSB0:rwm"
+  - "/dev/ttyUSB1:/dev/ttyUSB1:rwm"
+
+services:
+  - mqtt:need
+
+#  - j5-ha-bridge
+
+#privileged: true
+#Add-ons can call some API commands without needing to set hassio_api: true:
+#https://developers.home-assistant.io/docs/add-ons/communication
+hassio_role: "default"
+#hassio_api: true
+options:
+  baudrate: 115200 # baudrate for serial communication with the board, default is 115200
+  switches: [] # list of switches, default is none
+  relays: [] # list of relays, default is none
+  sensors: [] # list of sensors, default is none
+  thermometers: [] # list of thermometers, default is none
+  device: null
+  discovery_topic: "homeassistant"
+schema:
+  device: device(subsystem=tty) # device to wich board is connected
+  baudrate: list(9600|19200|38400|57600|115200)? # baudrate for serial communication with the board
+  discovery_topic: str?
+  switches:
+    - name: str # Specify the name of the switch
+      pin: str # Specify the data pin of the switch
+      type: list(NO|NC) # Normally Open or Normally Closed
+  relays:
+    - name: str? # Specify the name of the relay
+      pin: str # Specify the data pin of the relay
+      type: list(NO|NC) # Normally Open or Normally Closed
+  sensors:
+    - name: str # Specify the name of the sensor
+      pin: str # Specify the pin of the sensor
+      unit: str # Specify the unit of the sensor
+      device_class: list(battery|current|humidity|pressure|temperature|voltage)?
+      scale_min: float?
+      scale_max: float?
+      threshold: float?
+      freq: int?
+  thermometers:
+    - name: str # Specify the name of the thermometer
+      pin: str # Specify the pin of the thermometer
+      address: str? # Specify, when the address of the thermometer, should be provided as it is used for unique_id in mqtt topic except for AUTO-DS18B20
+      controler: list(ANALOG|LM35|TMP36|DS18B20|MPU6050|GROVE|BMP180|MPL115A2|MPL3115A2|HTU21D|MCP9808|SI7020|SI7021|LSM303C|AUTO-DS18B20) # Specify the type of thermometer
+      unit: list('°F'|'K'|'°C')? # Specify the unit of the thermometer, default is "°C"

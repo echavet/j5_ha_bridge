@@ -1,0 +1,9 @@
+addon: "MQTT Addon"
+#host: "192.168.1.14"
+host: "10.1.101.172"
+port: 1883
+ssl: false
+password: "mqtttestclient"
+username: "mqtttestclient"
+protocol: "mqtt://"
+discovery_topic: "homeassistant"

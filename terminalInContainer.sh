@@ -1,0 +1,1 @@
+docker run -it local/aarch64-addon-configurablefirmata_hassio_bridge:1.1.1 /bin/bash
