@@ -55,7 +55,7 @@ class MQTTSensor extends Sensor {
         if (sensorData != undefined) {
             this.mqttClient.publish(this.stateTopic, sensorData.toString());
         } else {
-            Console.log("ATTENTION");
+            console.log("ATTENTION");
             debug(`ATTENTION ${this.sensorConfig.name} changed value: ${sensorData}`);
         }
     }
