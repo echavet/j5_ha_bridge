@@ -12,8 +12,10 @@ J5 Hassio Bridge est un add-on pour Home Assistant qui facilite l'interfaçage a
 
 ## Installation
 
-1. Ouvrez Home Assistant et accédez à l'onglet "Supervisor".
-2. Sélectionnez "Add-on Store" dans la barre latérale.
-3. Recherchez "J5 Hassio Bridge" dans la barre de recherche et sélectionnez l'add-on.
-4. Cliquez sur "INSTALL".
+1. Ouvrez Home Assistant et accédez au menu "Paramètres".
+2. Sélectionnez "Modules complémentaires".
+3. Appuyez sur le bouton Boutique des Modules Complémentaires.
+4. Cliquer sur le bouton "..." en haut à droite.
+5. Ajouter le dépot https://github.com/echavet/j5_ha_bridge 
+6. De retour dans la liste des addons, vous devriez trouver j5_ha_bridge dans la section "Johnny-Five Home Assistant addon repository"
 
