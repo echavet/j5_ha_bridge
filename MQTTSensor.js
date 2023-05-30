@@ -36,9 +36,9 @@ class MQTTSensor extends Sensor {
                 manufacturer: SLUG
             }
         }
-        debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.custom.unique_id}/config`)
+        debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`)
         debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
-        this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.custom.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
+        this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
 
     }
     handleChange() {
