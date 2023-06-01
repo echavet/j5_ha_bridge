@@ -10,10 +10,10 @@ arch:
   - armv7
   - i386
 devices:
-  - "/dev/ttyACM0:/dev/ttyACM0:rwm"
-  - "/dev/ttyACM1:/dev/ttyACM1:rwm"
-  - "/dev/ttyUSB0:/dev/ttyUSB0:rwm"
-  - "/dev/ttyUSB1:/dev/ttyUSB1:rwm"
+  - "/dev/ttyACM0"
+  - "/dev/ttyACM1"
+  - "/dev/ttyUSB0"
+  - "/dev/ttyUSB1"
 
 services:
   - mqtt:need
