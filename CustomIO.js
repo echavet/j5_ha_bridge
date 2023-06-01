@@ -121,7 +121,6 @@ class CustomIO extends Board {
 
 
     configureThermometer(thermometerItem) {
-        debug("found Thermometer:");
         debug(`found Thermometer ${thermometerItem.address} named ${thermometerItem.name} pin ${thermometerItem.pin} controler ${thermometerItem.controler}`);
         //debug(`unit ${thermometerItem.unit}`);
         //debug(`class ${thermometerItem.device_class}`);
