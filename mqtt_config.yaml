@@ -1,7 +1,7 @@
 addon: "MQTT Addon"
 #host: "192.168.1.14"   #maison: homeassistant.local
-host: "192.168.99.41" #bureau: ha-test.local
-#host: "10.1.101.172"   #bureau: homeassistant.local  (Pi3)
+#host: "192.168.99.41" #bureau: ha-test.local
+host: "10.1.101.172" #bureau: homeassistant.local  (Pi3)
 port: 1883
 ssl: false
 password: "mqtttestclient"

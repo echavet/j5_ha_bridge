@@ -3,6 +3,8 @@ const util = require('./util.js');
 const { Console } = require('console');
 const debug = require('debug')('MQTTSensor');
 const SLUG = "j5_ha_bridge";
+const everpolate = require('everpolate');
+//const regression = require('regression');
 
 class MQTTSensor extends Sensor {
     constructor(options, mqttManager, addonConfig, sensorConfig) {
@@ -14,7 +16,7 @@ class MQTTSensor extends Sensor {
         this.mqttClient = mqttManager.mqttClient;
         this.mqttConfig = mqttManager.mqttConfig;
         this.unique_id = `${util.convertWith_(this.sensorConfig.name)}_on_pin_${this.sensorConfig.pin}`;
-
+        this.calibration = sensorConfig.calibration;
         // Generate a unique MQTT topic for this sensor
         this.stateTopic = `${SLUG}/sensor/${this.unique_id}`;
 
@@ -43,11 +45,24 @@ class MQTTSensor extends Sensor {
     }
     handleChange() {
 
+        debug(`Brut data on ${this.name} ${this.value}`);
+
         let sensorData = this.value;
 
-        if (this.addonConfig.scale_min && this.addonConfig.scale_max) {
-            sensorData = this.scaleTo(this.addonConfig.scale_min, this.addonConfig.scale_max);  // Scale the sensor's data from 0-1023 to 0-100
+        if (this.calibration) {
+            if (!this.regression) {
+                this.regression =
+                    everpolate.linearRegression(this.calibration.x_points, this.calibration.y_points);
+            }
+
+            debug(`Interpolation of  ${this.value} -> is `);
+            sensorData = this.regression.evaluate(sensorData);
+            debug(`Interpolation of  ${this.value} -> is ${sensorData}`);
         }
+
+        /*if (this.addonConfig.scale_min && this.addonConfig.scale_max) {
+            sensorData = this.scaleTo(this.addonConfig.scale_min, this.addonConfig.scale_max);  // Scale the sensor's data from 0-1023 to 0-100
+        }*/
 
         debug(`Sensor ${this.sensorConfig.name} changed value: ${sensorData}`);
 

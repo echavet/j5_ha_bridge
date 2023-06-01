@@ -54,10 +54,11 @@ schema:
       unit: str # Specify the unit of the sensor
       #device_class: list(battery|current|humidity|pressure|temperature|voltage)?
       device_class: list(None|apparent_power|aqi|atmospheric_pressure|battery|carbon_dioxide|carbon_monoxide|current|data_rate|data_size|date|distance|duration|energy|energy_storage|enum|frequency|gas|humidity|illuminance|irradiance|moisture|monetary|nitrogen_dioxide|nitrogen_monoxide|nitrous_oxide|ozone|pm1|pm25|pm10|power_factor|power|precipitation|precipitation_intensity|pressure|reactive_power|signal_strength|sound_pressure|speed|sulphur_dioxide|temperature|timestamp|volatile_organic_compounds|voltage|volume|volume_storage|water|weight|wind_speed)
-      scale_min: float?
-      scale_max: float?
       threshold: float?
       freq: int?
+      calibration:
+        x_points: list(float)?
+        y_points: list(float)?
   thermometers:
     - name: str # Specify the name of the thermometer
       pin: str # Specify the pin of the thermometer

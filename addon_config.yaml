@@ -1,11 +1,11 @@
-#device: "/dev/tty.usbmodem1432402"
+device: "/dev/tty.usbmodem1432402"
 #device: "/dev/tty.usbmodem1432202"
 #device: "/dev/tty.usbmodem1432201"
-device: "/dev/tty.usbmodem14101"
+#device: "/dev/tty.usbmodem14101"
 baudrate: 115200
 discovery_topic: "homeassistant"
+thermometers: []
 
-#switches: []
 binary_sensors:
   - name: "Détecteur de débit TEST"
     pin: 11
@@ -31,14 +31,22 @@ relays:
     type: "NC"
     device_class: "switch"
 sensors:
-  - name: "Pression Filtre à Sable TEST"
+  - name: "JoypadX"
     pin: "A0"
     #threshold: 3
-    freq: 500
+    freq: 100
     unit: bar
     device_class: pressure
-
-thermometers:
-  - name: "Thermometers AUTO TEST"
-    pin: 12
-    controler: AUTO-DS18B20
+    calibration:
+      x_points: [103, 151]
+      y_points: [0.2, 0.8]
+  - name: "JoypadY"
+    pin: "A1"
+    #threshold: 3
+    freq: 100
+    unit: bar
+    device_class: pressure
+#thermometers:
+#  - name: "Thermometers AUTO TEST"
+#    pin: 12
+#    controler: AUTO-DS18B20
