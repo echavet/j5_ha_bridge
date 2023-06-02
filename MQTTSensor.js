@@ -50,6 +50,12 @@ class MQTTSensor extends Sensor {
         let sensorData = this.value;
 
         if (this.calibration) {
+            this.calibration.x_points = [];
+            this.calibration.y_points = [];
+            this.calibration.forEach(point => {
+                this.calibration.x_points.push(point.x_point);
+                this.calibration.y_points.push(point.y_point);
+            });
             if (!this.regression) {
                 this.regression =
                     everpolate.linearRegression(this.calibration.x_points, this.calibration.y_points);

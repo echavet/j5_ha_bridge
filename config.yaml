@@ -57,8 +57,8 @@ schema:
       threshold: float?
       freq: int?
       calibration:
-        x_points: list(float)?
-        y_points: list(float)?
+        - x_point: float?
+          y_point: float?
   thermometers:
     - name: str # Specify the name of the thermometer
       pin: str # Specify the pin of the thermometer
