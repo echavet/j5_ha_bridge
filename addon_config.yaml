@@ -30,13 +30,16 @@ relays:
     pin: 13
     type: "NC"
     device_class: "switch"
-calibrations:
-  - name: joypad
-    x_point: 103
-    y_point: 0.2
-  - name: joypad
-    x_point: 151
-    y_point: 0.8
+calibration_sets:
+  - set: joypad
+    x_point: 125
+    y_point: 4
+  - set: joypad
+    x_point: 512
+    y_point: 7
+  - set: joypad
+    x_point: 652
+    y_point: 9
 sensors:
   - name: "JoypadX"
     pin: "A0"
@@ -44,7 +47,10 @@ sensors:
     freq: 100
     unit: bar
     device_class: pressure
-    calibration_points_name: joypad
+    calibration_set: joypad
+    calibration_type: polynomial
+    calibration_precision: 20
+    calibration_order: 4
   - name: "JoypadY"
     pin: "A1"
     #threshold: 3

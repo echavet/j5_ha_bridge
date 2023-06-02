@@ -1,6 +1,7 @@
 const { spawn } = require('child_process')
 const SerialPort = require('serialport');
 const debug = require('debug')('util')
+const error_ = require('debug')('errors')
 const readline = require('readline');
 const axios = require('axios');
 
@@ -44,8 +45,8 @@ function waitForEnterKey() {
     });
 }
 async function handleError(error) {
-    debug('Une erreur est survenue :');
-    debug(`${error}`);
+    error_('--- Une erreur est survenue -- ');
+    error_(`${error}`)
     console.error(error);
 
     //openShell();
