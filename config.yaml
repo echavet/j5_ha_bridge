@@ -50,9 +50,9 @@ schema:
   binary_sensors:
     - name: str # Specify the name of the switch
       pin: str # Specify the data pin of the switch
-      type: list(NO|NC) # Normally Open or Normally Closed
+      type: list(NO|NC)? # Normally Open or Normally Closed
       device_class: list(None|battery|battery_charging|carbon_monoxide|cold|connectivity|door|garage_door|gas|heat|light|lock|moisture|motion|moving|occupancy|opening|plug|power|presence|problem|running|safety|smoke|sound|tamper|update|vibration|window)?
-      invert: bool
+      invert: bool?
   relays:
     - name: str? # Specify the name of the relay
       pin: str # Specify the data pin of the relay
