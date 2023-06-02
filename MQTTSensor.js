@@ -16,7 +16,19 @@ class MQTTSensor extends Sensor {
         this.mqttClient = mqttManager.mqttClient;
         this.mqttConfig = mqttManager.mqttConfig;
         this.unique_id = `${util.convertWith_(this.sensorConfig.name)}_on_pin_${this.sensorConfig.pin}`;
-        this.calibration = sensorConfig.calibration;
+        this.calibration_points_name = sensorConfig.calibration_points_name;
+
+        if (this.calibration_points_name) {
+            this.calibration = [];
+            this.addonConfig.calibrations.forEach(calibration => {
+                if (calibration.name == this.calibration_points_name) {
+                    if (!this.calibration.x_points) { this.calibration.x_points = [] };
+                    if (!this.calibration.y_points) { this.calibration.y_points = [] };
+                    this.calibration.x_points.push(calibration.x_point);
+                    this.calibration.y_points.push(calibration.y_point);
+                }
+            });
+        }
         // Generate a unique MQTT topic for this sensor
         this.stateTopic = `${SLUG}/sensor/${this.unique_id}`;
 
@@ -50,12 +62,12 @@ class MQTTSensor extends Sensor {
         let sensorData = this.value;
 
         if (this.calibration) {
-            this.calibration.x_points = [];
+            /*this.calibration.x_points = [];
             this.calibration.y_points = [];
             this.calibration.forEach(point => {
                 this.calibration.x_points.push(point.x_point);
                 this.calibration.y_points.push(point.y_point);
-            });
+            });*/
             if (!this.regression) {
                 this.regression =
                     everpolate.linearRegression(this.calibration.x_points, this.calibration.y_points);
