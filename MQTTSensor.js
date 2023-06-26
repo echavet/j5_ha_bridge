@@ -73,13 +73,20 @@ class MQTTSensor extends Sensor {
             device_class: this.sensorConfig.device_class,
             state_topic: this.stateTopic,
             unit_of_measurement: this.sensorConfig.unit,
-            //value_template: '{{ value_json.temperature }}',
+            value_template: '{{ value_json.value }}',
+            json_attributes_topic: this.stateTopic,         // same topic for state and attributes
+            json_attributes_template: "{{ {'Raw Value': value_json.raw_value} | tojson }}",
             device: {
                 name: this.sensorConfig.name,
                 identifiers: this.unique_id,
                 manufacturer: SLUG
             }
         }
+
+        if (this.state_class) {
+            jsonSensorConfig.state_class = this.state_class;
+        }
+
         debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`)
         debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
         this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
@@ -87,18 +94,22 @@ class MQTTSensor extends Sensor {
     }
     handleChange() {
 
-        let sensorData = this.value;
+        let sensorData = {
+            "value": this.value,
+            "raw_value": this.value
+        };
 
         if (this.calibration) {
             if (!this.regression) {
                 this.regression = regression[this.calibrationType](this.calibration.data_points,
                     { order: this.calibrationOrder, precision: this.calibrationPrecision });
-                info(`regression  : ${this.calibrationType}`);
+
+                info(`${this.sensorConfig.name} sensor is calibrated using regression  : ${this.calibrationType}`);
                 info(`${this.regression.string}`);
                 info(`r2 : ${this.regression.r2}`);
 
             }
-            sensorData = this.regression.predict(sensorData)[1];
+            sensorData.value = this.regression.predict(sensorData.raw_value)[1];
         }
 
         /*if (this.addonConfig.scale_min && this.addonConfig.scale_max) {
@@ -106,13 +117,14 @@ class MQTTSensor extends Sensor {
         }*/
 
 
-        debug(`Brut data ${this.value} on ${this.sensorConfig.name} -> ${sensorData}`);
+        debug(`Brut data ${this.raw_value} on ${this.sensorConfig.name} -> ${sensorData.value}`);
         // Publish the new sensor data to MQTT
-        if (sensorData != undefined) {
-            this.mqttClient.publish(this.stateTopic, sensorData.toString());
+        if (sensorData.value != undefined) {
+            //this.mqttClient.publish(this.stateTopic, sensorData.toString());
+            this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData));
         } else {
             console.log("ATTENTION");
-            debug(`ATTENTION ${this.sensorConfig.name} changed value: ${sensorData}`);
+            debug(`ATTENTION ${this.sensorConfig.name} changed value is undefined`);
         }
     }
 }

@@ -21,10 +21,10 @@ const util = require('./util.js')
 class CustomIO extends Board {
     // TODO: garder chaque entité en mémoire et écouter les évènements board.on('error' et board.on('disconneted'
     // afin de publier des unavailable et des available lorsque que la connexion est rétablie
-    constructor(config, mqttManager, options = {}, callback) {
+    constructor(addonConfig, mqttManager, options = {}, callback) {
         //const customBaudRate = util.CONFIGURABLE_FIRMATA_BAUD_RATE; // Remplacez par le baudrate souhaité        
-        let port = config.device;
-        let baudrate = parseInt(config.baudrate);
+        let port = addonConfig.device;
+        let baudrate = parseInt(addonConfig.baudrate);
         debug("Connection...", `port ${port}, baudrate ${baudrate}`);
         let spConfig = {
             ...options,
@@ -41,14 +41,14 @@ class CustomIO extends Board {
         this.mqttManager = mqttManager;
         this.mqttRelays = [];
 
-        config.switches = config.binary_sensors;    // switches in j5 are binary_sensors in ha
+        addonConfig.switches = addonConfig.binary_sensors;    // switches in j5 are binary_sensors in ha
 
-        this.switches = config.binary_sensors;        // binary_sensors
-        this.relays = config.relays;
-        this.sensors = config.sensors;
-        this.thermometers = config.thermometers;
+        this.switches = addonConfig.binary_sensors;        // binary_sensors
+        this.relays = addonConfig.relays;
+        this.sensors = addonConfig.sensors;
+        this.thermometers = addonConfig.thermometers;
 
-        this.addonConfig = config;
+        this.addonConfig = addonConfig;
         //console.log(config);
 
         this.on('error', (error) => {
@@ -63,7 +63,7 @@ class CustomIO extends Board {
         this.on('ready', () => {
             debug("La carte Arduino est prête.");
             // lecture des objets dans la config de l'addon et annonce mqtt si nécessaire.
-            this.setupEntities(this.mqttManager, this.addonConfig);
+            this.setupEntities(/*this.mqttManager, this.addonConfig*/);
 
             // Now that the board is ready, we can start to listen to the reboot message
 
@@ -85,9 +85,9 @@ class CustomIO extends Board {
     }
 
 
-    setupEntities(mqttManager, addonConfig) {
-        this.addonConfig = addonConfig;
-        this.mqttManager = mqttManager;
+    setupEntities(/*mqttManager, addonConfig*/) {
+        /*this.addonConfig = addonConfig;
+        this.mqttManager = mqttManager;*/
         //mqttManager.setConfig(this.addonConfig);
         this.switches.map(switchItem => {
             //switchItem.device_class = switchItem.device_class || "binary_sensor";
