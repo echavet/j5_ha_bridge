@@ -69,7 +69,7 @@ class MQTTThermometer extends Thermometer {
 
     updateState(celsius) {
         debug(`sending state for temp sensor ${this.custom.unique_id}: ${celsius.toString()}`);
-        this.mqttClient.publish(`${SLUG}/${this.itemConfig.device_class}/${this.custom.unique_id}/state`, celsius.toString());
+        this.mqttClient.publish(`${SLUG}/${this.itemConfig.device_class}/${this.custom.unique_id}/state`, celsius.toString(), { retain: true });
     }
 
 }

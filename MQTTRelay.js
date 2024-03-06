@@ -112,7 +112,7 @@ class MQTTRelay extends Relay {
             this.state = state;
             //setTimeout(() => {
             debug(`publishing topic: ${this.stateTopic} with payload: ${state}`);
-            this.mqttClient.publish(this.stateTopic, state, { qos: 1 }, (err) => {
+            this.mqttClient.publish(this.stateTopic, state, { qos: 1, retain: true }, (err) => {
                 if (err) debug(`Error publishing state: ${err}`);
             });
             //}, 3000);

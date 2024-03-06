@@ -46,9 +46,9 @@ class MQTTSensor extends Sensor {
 
                 this.addonConfig.calibration_sets.forEach(point => {
                     if (point.set == this.calibration_set) {
-                        if (!this.calibration.x_points) { this.calibration.x_points = []; };
-                        if (!this.calibration.y_points) { this.calibration.y_points = []; };
-                        if (!this.calibration.data_points) { this.calibration.data_points = []; };
+                        if (!this.calibration.x_points) { this.calibration.x_points = []; }
+                        if (!this.calibration.y_points) { this.calibration.y_points = []; }
+                        if (!this.calibration.data_points) { this.calibration.data_points = []; }
                         // those 2 ones are for const everpolate lib
                         this.calibration.x_points.push(point.x_point);
                         this.calibration.y_points.push(point.y_point);
@@ -121,7 +121,7 @@ class MQTTSensor extends Sensor {
         // Publish the new sensor data to MQTT
         if (sensorData.value != undefined) {
             //this.mqttClient.publish(this.stateTopic, sensorData.toString());
-            this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData));
+            this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData), { retain: true });
         } else {
             console.log("ATTENTION");
             debug(`ATTENTION ${this.sensorConfig.name} changed value is undefined`);
