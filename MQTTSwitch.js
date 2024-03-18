@@ -45,7 +45,7 @@ class MQTTSwitch extends Switch {
     }
 
     updateState(state) {
-        this.mqttClient.publish(this.stateTopic, state);
+        this.mqttClient.publish(this.stateTopic, state, { retain: true });        
     }
 }
 module.exports = MQTTSwitch;
