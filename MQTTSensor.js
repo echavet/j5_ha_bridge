@@ -73,9 +73,9 @@ class MQTTSensor extends Sensor {
             device_class: this.sensorConfig.device_class,
             state_topic: this.stateTopic,
             unit_of_measurement: this.sensorConfig.unit,
-            value_template: '{{ value_json.value }}',
-            json_attributes_topic: this.stateTopic,         // same topic for state and attributes
-            json_attributes_template: "{{ {'Raw Value': value_json.raw_value} | tojson }}",
+            value_template: '{{ value_json.value }}', // Extrait la valeur de l'état du JSON
+            json_attributes_topic: this.stateTopic, // Gardez la même rubrique pour les attributs
+            json_attributes_template: '{{ value_json.attributes | tojson }}', // Extrait les attributs
             device: {
                 name: this.sensorConfig.name,
                 identifiers: this.unique_id,
@@ -90,13 +90,14 @@ class MQTTSensor extends Sensor {
         debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`)
         debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
         this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
-
     }
+    
     handleChange() {
-
         let sensorData = {
             "value": this.value,
-            "raw_value": this.value
+            "attributes": {
+                "raw_value": this.value
+            }
         };
 
         if (this.calibration) {
@@ -109,24 +110,19 @@ class MQTTSensor extends Sensor {
                 info(`r2 : ${this.regression.r2}`);
 
             }
-            sensorData.value = this.regression.predict(sensorData.raw_value)[1];
+            sensorData.value = this.regression.predict(sensorData.attributes.raw_value)[1];
         }
 
-        /*if (this.addonConfig.scale_min && this.addonConfig.scale_max) {
-            sensorData = this.scaleTo(this.addonConfig.scale_min, this.addonConfig.scale_max);  // Scale the sensor's data from 0-1023 to 0-100
-        }*/
-
-
-        debug(`Brut data ${this.raw_value} on ${this.sensorConfig.name} -> ${sensorData.value}`);
+        debug(`Brut data ${this.raw} on ${this.sensorConfig.name} -> ${sensorData.value}`);
         // Publish the new sensor data to MQTT
         if (sensorData.value != undefined) {
-            //this.mqttClient.publish(this.stateTopic, sensorData.toString());
             this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData), { retain: true });
         } else {
             console.log("ATTENTION");
             debug(`ATTENTION ${this.sensorConfig.name} changed value is undefined`);
         }
     }
+
 }
 
 module.exports = MQTTSensor;
