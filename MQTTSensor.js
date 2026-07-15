@@ -92,11 +92,11 @@ class MQTTSensor extends Sensor {
         this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
     }
     
-    handleChange() {
+    handleChange(filteredValue) {
         let sensorData = {
-            "value": this.value,
+            "value": filteredValue,
             "attributes": {
-                "raw_value": this.value
+                "raw_value": filteredValue
             }
         };
 
@@ -113,7 +113,7 @@ class MQTTSensor extends Sensor {
             sensorData.value = this.regression.predict(sensorData.attributes.raw_value)[1];
         }
 
-        debug(`Brut data ${this.raw} on ${this.sensorConfig.name} -> ${sensorData.value}`);
+        debug(`Brut data ${filteredValue} on ${this.sensorConfig.name} -> ${sensorData.value}`);
         // Publish the new sensor data to MQTT
         if (sensorData.value != undefined) {
             this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData), { retain: true });
