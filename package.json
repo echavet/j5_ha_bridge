@@ -1,6 +1,6 @@
 {
     "name": "j5_hassio_bridge",
-    "version": "1.1.23",
+    "version": "2026.7.15",
     "description": "",
     "main": "index.js",
     "scripts": {
