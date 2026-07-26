@@ -5,6 +5,9 @@ const info = require('debug')('infos');
 const SLUG = "j5_ha_bridge";
 const regression = require('regression');
 
+/** Default consecutive max_jump rejects before accepting a new baseline. */
+const DEFAULT_MAX_JUMP_STREAK = 5;
+
 /**
  * Median of a numeric array (copy-sort; does not mutate input).
  * @param {number[]} values
@@ -22,6 +25,15 @@ function medianOf(values) {
     return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/**
+ * HA addon schema bool? → real boolean (reject stringly "false").
+ * @param {*} v
+ * @returns {boolean}
+ */
+function isConfigTrue(v) {
+    return v === true;
+}
+
 class MQTTSensor extends Sensor {
     constructor(options, mqttManager, addonConfig, sensorConfig) {
         super(options);
@@ -35,6 +47,11 @@ class MQTTSensor extends Sensor {
 
         this.calibrationConfiguration(sensorConfig, addonConfig);
         this.filterConfiguration(sensorConfig);
+
+        // Companion HA entities (real sensors → full history; attributes alone are hard to historize).
+        this.publishRaw = isConfigTrue(sensorConfig.publish_raw);
+        // Calibrated companion only makes sense when a calibration curve exists.
+        this.publishCalibrated = isConfigTrue(sensorConfig.publish_calibrated) && !!this.calibration;
 
         // Generate a unique MQTT topic for this sensor
         this.stateTopic = `${SLUG}/sensor/${this.unique_id}`;
@@ -56,6 +73,12 @@ class MQTTSensor extends Sensor {
         this.maxJump = sensorConfig.max_jump != null && sensorConfig.max_jump !== ''
             ? Number(sensorConfig.max_jump)
             : null;
+        const streak = parseInt(sensorConfig.max_jump_streak, 10);
+        this.maxJumpStreak = Number.isFinite(streak) && streak > 0
+            ? streak
+            : DEFAULT_MAX_JUMP_STREAK;
+        this.jumpRejectStreak = 0;
+
         this.valueMin = sensorConfig.value_min != null && sensorConfig.value_min !== ''
             ? Number(sensorConfig.value_min)
             : null;
@@ -67,7 +90,7 @@ class MQTTSensor extends Sensor {
 
         if (this.filterSamples > 1 || this.maxJump != null || this.valueMin != null || this.valueMax != null) {
             info(`${sensorConfig.name} filter: samples=${this.filterSamples}` +
-                `${this.maxJump != null ? ` max_jump=${this.maxJump}` : ''}` +
+                `${this.maxJump != null ? ` max_jump=${this.maxJump} streak=${this.maxJumpStreak}` : ''}` +
                 `${this.valueMin != null ? ` value_min=${this.valueMin}` : ''}` +
                 `${this.valueMax != null ? ` value_max=${this.valueMax}` : ''}`);
         }
@@ -112,34 +135,96 @@ class MQTTSensor extends Sensor {
         }
     }
 
+    /**
+     * Shared HA "device" block so main + diagnostic entities group together.
+     */
+    haDevice() {
+        return {
+            name: this.sensorConfig.name,
+            identifiers: [this.unique_id],
+            manufacturer: SLUG,
+        };
+    }
+
+    discoveryConfigTopic(uniqueId) {
+        return `${this.addonConfig.discovery_topic}/sensor/${uniqueId}/config`;
+    }
+
+    /**
+     * Publish MQTT discovery, or clear a retained config when discovery is null/empty.
+     * @param {string} uniqueId
+     * @param {object|null} discovery discovery payload, or null to remove entity
+     */
+    publishDiscovery(uniqueId, discovery) {
+        const topic = this.discoveryConfigTopic(uniqueId);
+        if (!discovery) {
+            debug(`clear discovery topic: ${topic}`);
+            this.mqttClient.publish(topic, '', { retain: true });
+            return;
+        }
+        debug(`config topic: ${topic}`);
+        debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(discovery, null, 2)}`);
+        this.mqttClient.publish(topic, JSON.stringify(discovery), { retain: true });
+    }
+
     announce() {
-        let jsonSensorConfig = {
+        const main = {
             unique_id: `${this.unique_id}`,
             name: this.sensorConfig.name,
             device_class: this.sensorConfig.device_class,
             state_topic: this.stateTopic,
             unit_of_measurement: this.sensorConfig.unit,
-            value_template: '{{ value_json.value }}', // Extrait la valeur de l'état du JSON
-            json_attributes_topic: this.stateTopic, // Gardez la même rubrique pour les attributs
-            json_attributes_template: '{{ value_json.attributes | tojson }}', // Extrait les attributs
-            device: {
-                name: this.sensorConfig.name,
-                identifiers: this.unique_id,
-                manufacturer: SLUG
+            value_template: '{{ value_json.value }}',
+            json_attributes_topic: this.stateTopic,
+            json_attributes_template: '{{ value_json.attributes | tojson }}',
+            // Always set for HA history graphs (was previously only set if this.state_class existed — never wired)
+            state_class: this.sensorConfig.state_class || 'measurement',
+            device: this.haDevice(),
+        };
+
+        this.publishDiscovery(this.unique_id, main);
+
+        // Companions share the same JSON state_topic; value_template selects the field.
+        // Clear retained discovery when disabled so HA does not keep zombie entities.
+        if (this.publishRaw) {
+            this.publishDiscovery(`${this.unique_id}_raw`, {
+                unique_id: `${this.unique_id}_raw`,
+                name: `${this.sensorConfig.name} raw`,
+                state_topic: this.stateTopic,
+                unit_of_measurement: 'ADC',
+                value_template: '{{ value_json.attributes.raw_value }}',
+                state_class: 'measurement',
+                entity_category: 'diagnostic',
+                device: this.haDevice(),
+            });
+            info(`${this.sensorConfig.name}: MQTT discovery for raw ADC companion entity`);
+        } else {
+            this.publishDiscovery(`${this.unique_id}_raw`, null);
+        }
+
+        if (this.publishCalibrated) {
+            this.publishDiscovery(`${this.unique_id}_calibrated`, {
+                unique_id: `${this.unique_id}_calibrated`,
+                name: `${this.sensorConfig.name} calibrated`,
+                state_topic: this.stateTopic,
+                unit_of_measurement: this.sensorConfig.unit,
+                // Post filter_samples + calibration, pre min/max/max_jump guards
+                value_template: '{{ value_json.attributes.calibrated }}',
+                state_class: 'measurement',
+                entity_category: 'diagnostic',
+                device: this.haDevice(),
+            });
+            info(`${this.sensorConfig.name}: MQTT discovery for pre-guard calibrated companion entity`);
+        } else {
+            this.publishDiscovery(`${this.unique_id}_calibrated`, null);
+            if (isConfigTrue(this.sensorConfig.publish_calibrated) && !this.calibration) {
+                info(`${this.sensorConfig.name}: publish_calibrated ignored (no calibration_set)`);
             }
         }
-
-        if (this.state_class) {
-            jsonSensorConfig.state_class = this.state_class;
-        }
-
-        debug(`config topic: ${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`)
-        debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
-        this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
     }
 
     /**
-     * Apply optional sliding median on successive Johnny-Five readings (already median-filtered per interval).
+     * Sliding median on successive Johnny-Five readings (already median-filtered per interval).
      * @param {number} sample
      * @returns {number}
      */
@@ -151,20 +236,19 @@ class MQTTSensor extends Sensor {
         while (this.rawWindow.length > this.filterSamples) {
             this.rawWindow.shift();
         }
-        // Need a full window before trusting the median (avoids cold-start bias)
-        if (this.rawWindow.length < this.filterSamples) {
-            return medianOf(this.rawWindow);
-        }
         return medianOf(this.rawWindow);
     }
 
     /**
-     * After calibration: reject absurd jumps / out-of-range values (keep last good).
+     * After calibration: reject absurd jumps / out-of-range values (keep last good),
+     * but accept a new baseline after max_jump_streak consecutive jump rejects
+     * so a lasting step change (minutes) is not locked out forever.
      * @param {number} candidate
      * @returns {{ value: number, accepted: boolean, reason: string|null }}
      */
     applyValueGuards(candidate) {
         if (candidate == null || Number.isNaN(candidate)) {
+            this.jumpRejectStreak = 0;
             return {
                 value: this.lastPublishedValue,
                 accepted: false,
@@ -173,6 +257,7 @@ class MQTTSensor extends Sensor {
         }
 
         if (this.valueMin != null && candidate < this.valueMin) {
+            this.jumpRejectStreak = 0;
             return {
                 value: this.lastPublishedValue !== undefined ? this.lastPublishedValue : candidate,
                 accepted: false,
@@ -180,6 +265,7 @@ class MQTTSensor extends Sensor {
             };
         }
         if (this.valueMax != null && candidate > this.valueMax) {
+            this.jumpRejectStreak = 0;
             return {
                 value: this.lastPublishedValue !== undefined ? this.lastPublishedValue : candidate,
                 accepted: false,
@@ -190,6 +276,16 @@ class MQTTSensor extends Sensor {
         if (this.maxJump != null && this.lastPublishedValue !== undefined) {
             const delta = Math.abs(candidate - this.lastPublishedValue);
             if (delta > this.maxJump) {
+                this.jumpRejectStreak += 1;
+                if (this.jumpRejectStreak >= this.maxJumpStreak) {
+                    // Sustained step change → adopt new baseline
+                    this.jumpRejectStreak = 0;
+                    return {
+                        value: candidate,
+                        accepted: true,
+                        reason: 'max_jump_accepted',
+                    };
+                }
                 return {
                     value: this.lastPublishedValue,
                     accepted: false,
@@ -198,6 +294,7 @@ class MQTTSensor extends Sensor {
             }
         }
 
+        this.jumpRejectStreak = 0;
         return { value: candidate, accepted: true, reason: null };
     }
 
@@ -205,6 +302,7 @@ class MQTTSensor extends Sensor {
         const instantRaw = j5Value;
         const filteredRaw = this.applySampleWindow(instantRaw);
 
+        // engineering: post-window, post-calibration (or raw if no curve)
         let calibrated = filteredRaw;
         if (this.calibration) {
             if (!this.regression) {
@@ -240,11 +338,12 @@ class MQTTSensor extends Sensor {
                 calibrated: calibrated,
                 accepted: guarded.accepted,
                 reject_reason: guarded.reason,
+                jump_streak: this.jumpRejectStreak,
             },
         };
 
         debug(`Brut ${instantRaw} filtered_raw ${filteredRaw} on ${this.sensorConfig.name} -> ${sensorData.value}` +
-            (guarded.reason ? ` [rejected:${guarded.reason} cal=${calibrated}]` : ''));
+            (guarded.reason ? ` [${guarded.reason} cal=${calibrated}]` : ''));
 
         if (sensorData.value != undefined && !Number.isNaN(sensorData.value)) {
             this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData), { retain: true });

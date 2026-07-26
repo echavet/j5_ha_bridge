@@ -1,6 +1,6 @@
 name: "J5 Hassio Bridge"
 description: "Bridge to interface arduino's (ConfigurableFirmata) with HAssio via Johnny-Five."
-version: "2026.7.26.03"
+version: "2026.7.26.05"
 slug: "j5_ha_bridge"
 init: false
 arch:
@@ -69,12 +69,17 @@ schema:
       state_class: list(measurement,total,total_increasing)?
       threshold: float?
       freq: int?
-      # Optional noise hardening (useful for ORP/redox): sliding median of N Johnny-Five readings,
-      # max jump in calibrated units between publishes, and hard min/max after calibration.
+      # Optional signal hardening: sliding median of N readings, max jump (with streak re-baseline),
+      # and hard min/max after calibration. max_jump alone would lock on a lasting step change;
+      # after max_jump_streak consecutive rejects the new value is accepted (default streak: 5).
       filter_samples: int?
       max_jump: float?
+      max_jump_streak: int?
       value_min: float?
       value_max: float?
+      # Separate HA sensors (full history). publish_calibrated requires calibration_set.
+      publish_raw: bool?
+      publish_calibrated: bool?
       calibration_set: str?
       calibration_type: list(linear|polynomial|exponential|logarithmic|power)?
       calibration_precision: int?
