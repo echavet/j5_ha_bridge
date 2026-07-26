@@ -223,12 +223,12 @@ function axiosRequest(api, callback) {
 }
 
 /**
- * Log a line to HA addon console + debug namespace.
+ * Log a line to HA addon console only.
+ * (Avoid also calling debug() — DEBUG=util* would duplicate every line.)
  * @param {string} msg
  */
 function logAddonLine(msg) {
     console.log(`[j5_ha_bridge] ${msg}`);
-    debug(msg);
 }
 
 /**
@@ -264,6 +264,51 @@ function resolveDevicePath(devicePath) {
 }
 
 /**
+ * Parse Linux udev by-id basenames for productId / serial when SerialPort.list()
+ * has no udev metadata (common inside HA addon containers).
+ *
+ * Examples:
+ *   usb-Arduino__www.arduino.cc__0043_24236323730351306161-if00
+ *   usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0
+ *
+ * @param {string} devicePath full path or basename from user config
+ * @returns {{ productId: string|null, serialNumber: string|null, rawName: string|null }}
+ */
+function parseSerialByIdPath(devicePath) {
+    const empty = { productId: null, serialNumber: null, rawName: null };
+    if (!devicePath) {
+        return empty;
+    }
+    const parts = String(devicePath).split('/').filter(Boolean);
+    const base = parts.length ? parts[parts.length - 1] : '';
+    if (!base) {
+        return empty;
+    }
+
+    // Arduino / many CDC devices: ...__0043_<serial>-if00
+    let m = base.match(/__([0-9A-Fa-f]{4})_([^-]+?)(?:-if\d+|-port\d+)*$/);
+    if (m) {
+        return {
+            productId: m[1].toLowerCase(),
+            serialNumber: m[2],
+            rawName: base,
+        };
+    }
+
+    // Broader: last _XXXX_token before -if/-port
+    m = base.match(/_([0-9A-Fa-f]{4})_([A-Za-z0-9]+)(?:-if\d+|-port\d+)*$/);
+    if (m) {
+        return {
+            productId: m[1].toLowerCase(),
+            serialNumber: m[2],
+            rawName: base,
+        };
+    }
+
+    return { productId: null, serialNumber: null, rawName: base };
+}
+
+/**
  * Whether a SerialPort.list() entry matches the user-configured device path.
  * Never hardcodes a port: configuredPath always comes from addon config.
  * @param {string} configuredPath
@@ -292,6 +337,11 @@ function serialPortMatchesConfig(configuredPath, portInfo, configuredResolved) {
     if (portInfo.pnpId && configuredPath.includes(portInfo.pnpId)) {
         return true;
     }
+    // serial embedded in by-id when list() has empty serialNumber
+    const fromById = parseSerialByIdPath(configuredPath);
+    if (fromById.serialNumber && portInfo.path && resolvedConfig === resolvedListed) {
+        return true;
+    }
     return false;
 }
 
@@ -315,7 +365,7 @@ function identifyArduinoUsb(productId, vendorId) {
     }
     if (entry && !vid) {
         // Some environments omit vendorId; still show the known product name.
-        return { label: `${entry.name} (vendorId absent)`, adcHint: entry.adcHint || null };
+        return { label: `${entry.name} (via productId ${pid})`, adcHint: entry.adcHint || null };
     }
     if (entry) {
         return {
@@ -327,6 +377,27 @@ function identifyArduinoUsb(productId, vendorId) {
         label: `non reconnu (vid=${vid || '?'}, pid=${pid})`,
         adcHint: null,
     };
+}
+
+/**
+ * Prefer udev fields from SerialPort.list(); fall back to by-id path parsing
+ * (HA containers often expose the device node without vendorId/productId).
+ * @param {object|null} portInfo
+ * @param {string} configuredPath
+ * @returns {{ productId: string|null, vendorId: string|null, serialNumber: string|null, source: string }}
+ */
+function resolveUsbIdentity(portInfo, configuredPath) {
+    const fromById = parseSerialByIdPath(configuredPath);
+    const productId = (portInfo && portInfo.productId) || fromById.productId || null;
+    const vendorId = (portInfo && portInfo.vendorId) || null;
+    const serialNumber = (portInfo && portInfo.serialNumber) || fromById.serialNumber || null;
+    let source = 'none';
+    if (portInfo && portInfo.productId) {
+        source = 'serialport';
+    } else if (fromById.productId) {
+        source = 'by-id path';
+    }
+    return { productId, vendorId, serialNumber, source };
 }
 
 /**
@@ -347,10 +418,24 @@ async function logSerialPortIdentity(configuredPath, baudrate) {
         logAddonLine(`Config résolu   : ${configuredResolved}`);
     }
 
+    const byIdHint = parseSerialByIdPath(configuredPath);
+    if (byIdHint.productId) {
+        logAddonLine(`by-id productId : ${byIdHint.productId}${byIdHint.serialNumber ? `  serial=${byIdHint.serialNumber}` : ''}`);
+    }
+
     try {
         const ports = await SerialPort.list();
         if (!ports || ports.length === 0) {
-            logAddonLine('Aucun port série listé par le système.');
+            // Still identify from by-id alone (no list metadata in some containers)
+            const usb = resolveUsbIdentity(null, configuredPath);
+            const id = identifyArduinoUsb(usb.productId, usb.vendorId);
+            logAddonLine('Aucun port série listé par SerialPort.list().');
+            if (usb.productId) {
+                logAddonLine(`Identification (by-id) : ${id.label}  [source=${usb.source}]`);
+                if (id.adcHint) {
+                    logAddonLine(`ADC typique           : ${id.adcHint}`);
+                }
+            }
             logAddonLine('--------------------------------');
             return null;
         }
@@ -358,34 +443,61 @@ async function logSerialPortIdentity(configuredPath, baudrate) {
         logAddonLine(`Ports USB/série détectés (${ports.length}) :`);
         let match = null;
         for (const p of ports) {
-            const id = identifyArduinoUsb(p.productId, p.vendorId);
             const isMatch = serialPortMatchesConfig(configuredPath, p, configuredResolved);
             if (isMatch) {
                 match = p;
             }
+            // For each listed port, enrich with by-id only when it is the configured device
+            const usb = isMatch
+                ? resolveUsbIdentity(p, configuredPath)
+                : {
+                    productId: p.productId || null,
+                    vendorId: p.vendorId || null,
+                    serialNumber: p.serialNumber || null,
+                    source: p.productId ? 'serialport' : 'none',
+                };
+            const id = identifyArduinoUsb(usb.productId, usb.vendorId);
 
             const mark = isMatch ? '>>> ' : '    ';
             logAddonLine(`${mark}path=${p.path}`);
-            logAddonLine(`${mark}  manufacturer=${p.manufacturer || '-'} vendorId=${p.vendorId || '-'} productId=${p.productId || '-'}`);
-            logAddonLine(`${mark}  serialNumber=${p.serialNumber || '-'} pnpId=${p.pnpId || '-'}`);
+            logAddonLine(`${mark}  manufacturer=${p.manufacturer || '-'} vendorId=${usb.vendorId || p.vendorId || '-'} productId=${usb.productId || '-'}`);
+            logAddonLine(`${mark}  serialNumber=${usb.serialNumber || '-'} pnpId=${p.pnpId || '-'}  idSource=${usb.source}`);
             logAddonLine(`${mark}  carte (USB)≈ ${id.label}`);
         }
 
         if (match) {
-            const id = identifyArduinoUsb(match.productId, match.vendorId);
+            const usb = resolveUsbIdentity(match, configuredPath);
+            const id = identifyArduinoUsb(usb.productId, usb.vendorId);
             logAddonLine(`Port configuré trouvé : ${match.path}`);
-            logAddonLine(`Identification USB    : ${id.label}`);
+            logAddonLine(`Identification USB    : ${id.label}  [source=${usb.source}]`);
             if (id.adcHint) {
                 logAddonLine(`ADC typique (USB)     : ${id.adcHint}`);
             }
         } else {
+            // Configured path may still be usable even if list matching failed
+            const usb = resolveUsbIdentity(null, configuredPath);
+            const id = identifyArduinoUsb(usb.productId, usb.vendorId);
             logAddonLine(`ATTENTION: le device configuré ne correspond à aucun port listé.`);
+            if (usb.productId) {
+                logAddonLine(`Identification (by-id) : ${id.label}  [source=${usb.source}]`);
+                if (id.adcHint) {
+                    logAddonLine(`ADC typique           : ${id.adcHint}`);
+                }
+            }
             logAddonLine(`Vérifiez options "device" de l'addon, le by-id, et les droits du conteneur.`);
         }
         logAddonLine('--------------------------------');
         return match;
     } catch (err) {
         logAddonLine(`Impossible de lister les ports série: ${err && err.message ? err.message : err}`);
+        const usb = resolveUsbIdentity(null, configuredPath);
+        const id = identifyArduinoUsb(usb.productId, usb.vendorId);
+        if (usb.productId) {
+            logAddonLine(`Identification (by-id) : ${id.label}  [source=${usb.source}]`);
+            if (id.adcHint) {
+                logAddonLine(`ADC typique           : ${id.adcHint}`);
+            }
+        }
         logAddonLine('--------------------------------');
         return null;
     }

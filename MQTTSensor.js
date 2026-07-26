@@ -1,11 +1,26 @@
 const { Sensor } = require('johnny-five');
 const util = require('./util.js');
-const { Console } = require('console');
 const debug = require('debug')('MQTTSensor');
 const info = require('debug')('infos');
 const SLUG = "j5_ha_bridge";
-const everpolate = require('everpolate');
 const regression = require('regression');
+
+/**
+ * Median of a numeric array (copy-sort; does not mutate input).
+ * @param {number[]} values
+ * @returns {number|undefined}
+ */
+function medianOf(values) {
+    if (!values || values.length === 0) {
+        return undefined;
+    }
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 1) {
+        return sorted[mid];
+    }
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 class MQTTSensor extends Sensor {
     constructor(options, mqttManager, addonConfig, sensorConfig) {
@@ -19,6 +34,7 @@ class MQTTSensor extends Sensor {
         this.unique_id = `${util.convertWith_(this.sensorConfig.name)}_on_pin_${this.sensorConfig.pin}`;
 
         this.calibrationConfiguration(sensorConfig, addonConfig);
+        this.filterConfiguration(sensorConfig);
 
         // Generate a unique MQTT topic for this sensor
         this.stateTopic = `${SLUG}/sensor/${this.unique_id}`;
@@ -27,10 +43,40 @@ class MQTTSensor extends Sensor {
         // Subscribe to the sensor's change event
         this.on('change', this.handleChange.bind(this));
     }
+
+    /**
+     * Optional multi-sample / jump / range filtering (after Johnny-Five's per-interval median).
+     * All options are optional — omit them for previous behaviour.
+     */
+    filterConfiguration(sensorConfig) {
+        const n = parseInt(sensorConfig.filter_samples, 10);
+        this.filterSamples = Number.isFinite(n) && n > 1 ? n : 1;
+        this.rawWindow = [];
+
+        this.maxJump = sensorConfig.max_jump != null && sensorConfig.max_jump !== ''
+            ? Number(sensorConfig.max_jump)
+            : null;
+        this.valueMin = sensorConfig.value_min != null && sensorConfig.value_min !== ''
+            ? Number(sensorConfig.value_min)
+            : null;
+        this.valueMax = sensorConfig.value_max != null && sensorConfig.value_max !== ''
+            ? Number(sensorConfig.value_max)
+            : null;
+
+        this.lastPublishedValue = undefined;
+
+        if (this.filterSamples > 1 || this.maxJump != null || this.valueMin != null || this.valueMax != null) {
+            info(`${sensorConfig.name} filter: samples=${this.filterSamples}` +
+                `${this.maxJump != null ? ` max_jump=${this.maxJump}` : ''}` +
+                `${this.valueMin != null ? ` value_min=${this.valueMin}` : ''}` +
+                `${this.valueMax != null ? ` value_max=${this.valueMax}` : ''}`);
+        }
+    }
+
     /**
      * Loads calibration configuration for this sensor and stores the ones concerning this sensor
-     * @param {*} sensorConfig 
-     * @param {*} addonConfig 
+     * @param {*} sensorConfig
+     * @param {*} addonConfig
      */
     calibrationConfiguration(sensorConfig, addonConfig) {
         this.calibration_set = sensorConfig.calibration_set;
@@ -38,7 +84,7 @@ class MQTTSensor extends Sensor {
 
         if (this.calibration_set) {         // the sensor is to be scaled thanks to calibration points
             this.calibration = {};
-            if (this.calibration_sets) {    // it exists cal. sets in config                
+            if (this.calibration_sets) {    // it exists cal. sets in config
 
                 this.calibrationType = sensorConfig.calibration_type || "linear";
                 this.calibrationPrecision = sensorConfig.calibration_precision || 8;
@@ -52,7 +98,7 @@ class MQTTSensor extends Sensor {
                         // those 2 ones are for const everpolate lib
                         this.calibration.x_points.push(point.x_point);
                         this.calibration.y_points.push(point.y_point);
-                        // this one is for regression lib                   
+                        // this one is for regression lib
                         this.calibration.data_points.push([point.x_point, point.y_point]);
                     }
                 });
@@ -91,15 +137,75 @@ class MQTTSensor extends Sensor {
         debug(`Will publish config MQTT for discovery: ${SLUG} ${JSON.stringify(jsonSensorConfig, null, 2)}`)
         this.mqttClient.publish(`${this.addonConfig.discovery_topic}/sensor/${this.unique_id}/config`, JSON.stringify(jsonSensorConfig), { retain: true });
     }
-    
-    handleChange(filteredValue) {
-        let sensorData = {
-            "value": filteredValue,
-            "attributes": {
-                "raw_value": filteredValue
-            }
-        };
 
+    /**
+     * Apply optional sliding median on successive Johnny-Five readings (already median-filtered per interval).
+     * @param {number} sample
+     * @returns {number}
+     */
+    applySampleWindow(sample) {
+        if (this.filterSamples <= 1) {
+            return sample;
+        }
+        this.rawWindow.push(sample);
+        while (this.rawWindow.length > this.filterSamples) {
+            this.rawWindow.shift();
+        }
+        // Need a full window before trusting the median (avoids cold-start bias)
+        if (this.rawWindow.length < this.filterSamples) {
+            return medianOf(this.rawWindow);
+        }
+        return medianOf(this.rawWindow);
+    }
+
+    /**
+     * After calibration: reject absurd jumps / out-of-range values (keep last good).
+     * @param {number} candidate
+     * @returns {{ value: number, accepted: boolean, reason: string|null }}
+     */
+    applyValueGuards(candidate) {
+        if (candidate == null || Number.isNaN(candidate)) {
+            return {
+                value: this.lastPublishedValue,
+                accepted: false,
+                reason: 'nan',
+            };
+        }
+
+        if (this.valueMin != null && candidate < this.valueMin) {
+            return {
+                value: this.lastPublishedValue !== undefined ? this.lastPublishedValue : candidate,
+                accepted: false,
+                reason: 'below_min',
+            };
+        }
+        if (this.valueMax != null && candidate > this.valueMax) {
+            return {
+                value: this.lastPublishedValue !== undefined ? this.lastPublishedValue : candidate,
+                accepted: false,
+                reason: 'above_max',
+            };
+        }
+
+        if (this.maxJump != null && this.lastPublishedValue !== undefined) {
+            const delta = Math.abs(candidate - this.lastPublishedValue);
+            if (delta > this.maxJump) {
+                return {
+                    value: this.lastPublishedValue,
+                    accepted: false,
+                    reason: 'max_jump',
+                };
+            }
+        }
+
+        return { value: candidate, accepted: true, reason: null };
+    }
+
+    handleChange(j5Value) {
+        const instantRaw = j5Value;
+        const filteredRaw = this.applySampleWindow(instantRaw);
+
+        let calibrated = filteredRaw;
         if (this.calibration) {
             if (!this.regression) {
                 this.regression = regression[this.calibrationType](this.calibration.data_points,
@@ -108,14 +214,39 @@ class MQTTSensor extends Sensor {
                 info(`${this.sensorConfig.name} sensor is calibrated using regression  : ${this.calibrationType}`);
                 info(`${this.regression.string}`);
                 info(`r2 : ${this.regression.r2}`);
-
             }
-            sensorData.value = this.regression.predict(sensorData.attributes.raw_value)[1];
+            calibrated = this.regression.predict(filteredRaw)[1];
         }
 
-        debug(`Brut data ${filteredValue} on ${this.sensorConfig.name} -> ${sensorData.value}`);
-        // Publish the new sensor data to MQTT
-        if (sensorData.value != undefined) {
+        const guarded = this.applyValueGuards(calibrated);
+
+        // Only accepted readings establish / update the stable baseline
+        if (guarded.accepted && guarded.value !== undefined && !Number.isNaN(guarded.value)) {
+            this.lastPublishedValue = guarded.value;
+        }
+
+        // Publish last good value when rejecting; if none yet, still expose calibrated once
+        // so the entity is not stuck empty at startup (attributes show accepted=false).
+        let publishValue = this.lastPublishedValue;
+        if (publishValue === undefined) {
+            publishValue = calibrated;
+        }
+
+        const sensorData = {
+            value: publishValue,
+            attributes: {
+                raw_value: instantRaw,
+                filtered_raw: filteredRaw,
+                calibrated: calibrated,
+                accepted: guarded.accepted,
+                reject_reason: guarded.reason,
+            },
+        };
+
+        debug(`Brut ${instantRaw} filtered_raw ${filteredRaw} on ${this.sensorConfig.name} -> ${sensorData.value}` +
+            (guarded.reason ? ` [rejected:${guarded.reason} cal=${calibrated}]` : ''));
+
+        if (sensorData.value != undefined && !Number.isNaN(sensorData.value)) {
             this.mqttClient.publish(this.stateTopic, JSON.stringify(sensorData), { retain: true });
         } else {
             console.log("ATTENTION");

@@ -103,7 +103,14 @@ class CustomIO extends Board {
             util.logAddonLine(`Protocol version : ${proto.major != null ? `${proto.major}.${proto.minor}` : '-'}`);
 
             const res = this.RESOLUTION || {};
-            util.logAddonLine(`RESOLUTION.ADC   : ${res.ADC != null ? res.ADC : 'non fourni par le firmware'}`);
+            // Firmata reports max ADC count (e.g. 1023), not bit width
+            let adcLine = res.ADC != null ? String(res.ADC) : 'non fourni par le firmware';
+            if (res.ADC === 1023) {
+                adcLine += '  → 10 bits (0-1023), Vref carte typ. 5 V (Uno/Mega/…)';
+            } else if (res.ADC === 4095) {
+                adcLine += '  → 12 bits (0-4095), Vref carte typ. 3,3 V (Zero/Due/MKR/…)';
+            }
+            util.logAddonLine(`RESOLUTION.ADC   : ${adcLine}`);
             util.logAddonLine(`RESOLUTION.PWM   : ${res.PWM != null ? res.PWM : '-'}`);
             util.logAddonLine(`RESOLUTION.DAC   : ${res.DAC != null ? res.DAC : '-'}`);
 
