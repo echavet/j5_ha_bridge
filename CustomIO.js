@@ -26,6 +26,10 @@ class CustomIO extends Board {
         let port = addonConfig.device;
         let baudrate = parseInt(addonConfig.baudrate);
         debug("Connection...", `port ${port}, baudrate ${baudrate}`);
+
+        // Best-effort identity log only — connection always uses addonConfig.device (user config).
+        void util.logSerialPortIdentity(port, baudrate);
+
         let spConfig = {
             ...options,
             baudRate: baudrate,
@@ -62,6 +66,7 @@ class CustomIO extends Board {
 
         this.on('ready', () => {
             debug("La carte Arduino est prête.");
+            this.logBoardFirmwareIdentity();
             // lecture des objets dans la config de l'addon et annonce mqtt si nécessaire.
             this.setupEntities(/*this.mqttManager, this.addonConfig*/);
 
@@ -82,6 +87,33 @@ class CustomIO extends Board {
         });
 
 
+    }
+
+    /**
+     * Log Firmata firmware + ADC resolution once the board is ready (HA addon logs).
+     */
+    logBoardFirmwareIdentity() {
+        try {
+            util.logAddonLine('--- Identité firmware Firmata ---');
+            const fw = this.firmware || {};
+            const fwVer = fw.version || {};
+            const proto = this.version || {};
+            util.logAddonLine(`Firmware name    : ${fw.name != null ? fw.name : '-'}`);
+            util.logAddonLine(`Firmware version : ${fwVer.major != null ? `${fwVer.major}.${fwVer.minor}` : '-'}`);
+            util.logAddonLine(`Protocol version : ${proto.major != null ? `${proto.major}.${proto.minor}` : '-'}`);
+
+            const res = this.RESOLUTION || {};
+            util.logAddonLine(`RESOLUTION.ADC   : ${res.ADC != null ? res.ADC : 'non fourni par le firmware'}`);
+            util.logAddonLine(`RESOLUTION.PWM   : ${res.PWM != null ? res.PWM : '-'}`);
+            util.logAddonLine(`RESOLUTION.DAC   : ${res.DAC != null ? res.DAC : '-'}`);
+
+            if (Array.isArray(this.analogPins)) {
+                util.logAddonLine(`Broches analog.  : ${this.analogPins.length} (index Firmata: ${this.analogPins.join(', ')})`);
+            }
+            util.logAddonLine('--------------------------------');
+        } catch (err) {
+            util.logAddonLine(`logBoardFirmwareIdentity failed: ${err && err.message ? err.message : err}`);
+        }
     }
 
 

@@ -13,9 +13,52 @@ const token = process.env.SUPERVISOR_TOKEN;
 const CONFIG_API = 'http://supervisor/addons/self/options/config';
 const MQTT_SERVICE_API = 'http://supervisor/services/mqtt';
 
-module.exports = { getAddress, openShell, handleError, detectPort, getAddonConfig, getMQTTConfig, waitForEnterKey, printData, convertWith_ };
-
 const CONFIGURABLE_FIRMATA_BAUD_RATE = 115200;
+
+/** Arduino USB vendor IDs (official + old org). */
+const ARDUINO_USB_VENDORS = new Set(['2341', '2a03']);
+
+/**
+ * Known Arduino USB product IDs (vendor 2341 / 2a03) — display only, not exhaustive.
+ * adcHint is informational when Firmata does not report RESOLUTION.ADC.
+ */
+const ARDUINO_USB_PRODUCTS = {
+    '0001': { name: 'Uno (legacy)', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0010': { name: 'Mega 2560', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0036': { name: 'Leonardo', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0037': { name: 'Micro', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '003d': { name: 'Due Programming Port', adcHint: '12 bits, Vref ≈ 3,3 V' },
+    '003e': { name: 'Due Native USB', adcHint: '12 bits, Vref ≈ 3,3 V' },
+    '003f': { name: 'Mega ADK', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0042': { name: 'Mega 2560 R3', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0043': { name: 'Uno R3', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '0044': { name: 'Mega ADK R3', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '004d': { name: 'Zero Programming Port', adcHint: '12 bits (0-4095), Vref ≈ 3,3 V' },
+    '004e': { name: 'Zero Native USB (old)', adcHint: '12 bits (0-4095), Vref ≈ 3,3 V' },
+    '004f': { name: 'MKR1000', adcHint: '12 bits, Vref ≈ 3,3 V' },
+    '0058': { name: 'Mega 2560 R3 (alt)', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '8036': { name: 'Leonardo (Native)', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '8037': { name: 'Micro (Native)', adcHint: '10 bits (0-1023), Vref ≈ 5 V' },
+    '804d': { name: 'Zero Native USB', adcHint: '12 bits (0-4095), Vref ≈ 3,3 V' },
+    '804e': { name: 'Zero Native USB (CDC)', adcHint: '12 bits (0-4095), Vref ≈ 3,3 V' },
+    '804f': { name: 'MKR1000 (Native)', adcHint: '12 bits, Vref ≈ 3,3 V' },
+};
+
+module.exports = {
+    getAddress,
+    openShell,
+    handleError,
+    detectPort,
+    getAddonConfig,
+    getMQTTConfig,
+    waitForEnterKey,
+    printData,
+    convertWith_,
+    logSerialPortIdentity,
+    identifyArduinoUsb,
+    logAddonLine,
+    CONFIGURABLE_FIRMATA_BAUD_RATE,
+};
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -179,6 +222,175 @@ function axiosRequest(api, callback) {
     });
 }
 
+/**
+ * Log a line to HA addon console + debug namespace.
+ * @param {string} msg
+ */
+function logAddonLine(msg) {
+    console.log(`[j5_ha_bridge] ${msg}`);
+    debug(msg);
+}
+
+/**
+ * Normalize USB id hex (accepts "0x0043", "0043", 0x43, 67).
+ * @param {string|number|null|undefined} id
+ * @returns {string}
+ */
+function normalizeUsbId(id) {
+    if (id == null || id === '') {
+        return '';
+    }
+    if (typeof id === 'number') {
+        return id.toString(16).toLowerCase().padStart(4, '0');
+    }
+    return String(id).toLowerCase().replace(/^0x/, '');
+}
+
+/**
+ * Resolve symlinks (e.g. /dev/serial/by-id/... → /dev/ttyACM0).
+ * Returns the original path if resolution fails.
+ * @param {string} devicePath
+ * @returns {string}
+ */
+function resolveDevicePath(devicePath) {
+    if (!devicePath) {
+        return devicePath;
+    }
+    try {
+        return fs.realpathSync(devicePath);
+    } catch (_) {
+        return devicePath;
+    }
+}
+
+/**
+ * Whether a SerialPort.list() entry matches the user-configured device path.
+ * Never hardcodes a port: configuredPath always comes from addon config.
+ * @param {string} configuredPath
+ * @param {object} portInfo entry from SerialPort.list()
+ * @param {string} [configuredResolved] optional precomputed realpath
+ * @returns {boolean}
+ */
+function serialPortMatchesConfig(configuredPath, portInfo, configuredResolved) {
+    if (!configuredPath || !portInfo) {
+        return false;
+    }
+    if (portInfo.path === configuredPath) {
+        return true;
+    }
+    const resolvedConfig = configuredResolved != null
+        ? configuredResolved
+        : resolveDevicePath(configuredPath);
+    const resolvedListed = resolveDevicePath(portInfo.path);
+    if (resolvedConfig && resolvedListed && resolvedConfig === resolvedListed) {
+        return true;
+    }
+    // by-id path often embeds serialNumber; pnpId may appear in by-path names
+    if (portInfo.serialNumber && configuredPath.includes(portInfo.serialNumber)) {
+        return true;
+    }
+    if (portInfo.pnpId && configuredPath.includes(portInfo.pnpId)) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Map Arduino USB productId to a human-readable board family (+ optional ADC hint).
+ * @param {string|number} productId
+ * @param {string|number} [vendorId]
+ * @returns {{ label: string, adcHint: string|null }}
+ */
+function identifyArduinoUsb(productId, vendorId) {
+    if (productId == null || productId === '') {
+        return { label: 'inconnu (productId absent)', adcHint: null };
+    }
+    const pid = normalizeUsbId(productId);
+    const vid = normalizeUsbId(vendorId);
+    const entry = ARDUINO_USB_PRODUCTS[pid];
+    const isArduinoVendor = vid && ARDUINO_USB_VENDORS.has(vid);
+
+    if (entry && isArduinoVendor) {
+        return { label: entry.name, adcHint: entry.adcHint || null };
+    }
+    if (entry && !vid) {
+        // Some environments omit vendorId; still show the known product name.
+        return { label: `${entry.name} (vendorId absent)`, adcHint: entry.adcHint || null };
+    }
+    if (entry) {
+        return {
+            label: `${entry.name} (vendorId=${vid || '?'} non Arduino)`,
+            adcHint: entry.adcHint || null,
+        };
+    }
+    return {
+        label: `non reconnu (vid=${vid || '?'}, pid=${pid})`,
+        adcHint: null,
+    };
+}
+
+/**
+ * Log configured serial device + USB enumeration (visible in HA addon logs via console).
+ * The device path is always the one from addon config — nothing is hardcoded.
+ * Safe to call before opening the port; never rejects.
+ * @param {string} configuredPath path from addon config (device)
+ * @param {number|string} baudrate
+ * @returns {Promise<object|null>} matching port info if found
+ */
+async function logSerialPortIdentity(configuredPath, baudrate) {
+    logAddonLine('--- Identité port série / carte ---');
+    logAddonLine(`Config device   : ${configuredPath}`);
+    logAddonLine(`Config baudrate : ${baudrate}`);
+
+    const configuredResolved = resolveDevicePath(configuredPath);
+    if (configuredResolved && configuredResolved !== configuredPath) {
+        logAddonLine(`Config résolu   : ${configuredResolved}`);
+    }
+
+    try {
+        const ports = await SerialPort.list();
+        if (!ports || ports.length === 0) {
+            logAddonLine('Aucun port série listé par le système.');
+            logAddonLine('--------------------------------');
+            return null;
+        }
+
+        logAddonLine(`Ports USB/série détectés (${ports.length}) :`);
+        let match = null;
+        for (const p of ports) {
+            const id = identifyArduinoUsb(p.productId, p.vendorId);
+            const isMatch = serialPortMatchesConfig(configuredPath, p, configuredResolved);
+            if (isMatch) {
+                match = p;
+            }
+
+            const mark = isMatch ? '>>> ' : '    ';
+            logAddonLine(`${mark}path=${p.path}`);
+            logAddonLine(`${mark}  manufacturer=${p.manufacturer || '-'} vendorId=${p.vendorId || '-'} productId=${p.productId || '-'}`);
+            logAddonLine(`${mark}  serialNumber=${p.serialNumber || '-'} pnpId=${p.pnpId || '-'}`);
+            logAddonLine(`${mark}  carte (USB)≈ ${id.label}`);
+        }
+
+        if (match) {
+            const id = identifyArduinoUsb(match.productId, match.vendorId);
+            logAddonLine(`Port configuré trouvé : ${match.path}`);
+            logAddonLine(`Identification USB    : ${id.label}`);
+            if (id.adcHint) {
+                logAddonLine(`ADC typique (USB)     : ${id.adcHint}`);
+            }
+        } else {
+            logAddonLine(`ATTENTION: le device configuré ne correspond à aucun port listé.`);
+            logAddonLine(`Vérifiez options "device" de l'addon, le by-id, et les droits du conteneur.`);
+        }
+        logAddonLine('--------------------------------');
+        return match;
+    } catch (err) {
+        logAddonLine(`Impossible de lister les ports série: ${err && err.message ? err.message : err}`);
+        logAddonLine('--------------------------------');
+        return null;
+    }
+}
+
 // Fonction pour détecter le port de connexion de la carte
 function detectPort(portDetectedCallback) {
     SerialPort.list().then((ports) => {
@@ -193,7 +405,7 @@ function detectPort(portDetectedCallback) {
             }
 
             const port = availablePorts[index];
-            const serialPort = new SerialPort(port.path, { baudRate: util.CONFIGURABLE_FIRMATA_BAUD_RATE });
+            const serialPort = new SerialPort(port.path, { baudRate: CONFIGURABLE_FIRMATA_BAUD_RATE });
 
             serialPort.on('open', () => {
                 portDetectedCallback(null, port.path);

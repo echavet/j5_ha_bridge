@@ -1,6 +1,6 @@
 name: "J5 Hassio Bridge"
 description: "Bridge to interface arduino's (ConfigurableFirmata) with HAssio via Johnny-Five."
-version: "2026.7.15.02"
+version: "2026.7.26.01"
 slug: "j5_ha_bridge"
 init: false
 arch:
