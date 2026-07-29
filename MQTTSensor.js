@@ -8,6 +8,10 @@ const regression = require('regression');
 /** Default consecutive max_jump rejects before accepting a new baseline. */
 const DEFAULT_MAX_JUMP_STREAK = 5;
 
+/** DFRobot Gravity ORP (SEN0165 sample): Uno-style 5 V / 10-bit defaults. */
+const DFROBOT_ORP_VREF_MV = 5000;
+const DFROBOT_ORP_ADC_MAX = 1024;
+
 /**
  * Median of a numeric array (copy-sort; does not mutate input).
  * @param {number[]} values
@@ -32,6 +36,36 @@ function medianOf(values) {
  */
 function isConfigTrue(v) {
     return v === true;
+}
+
+/**
+ * DFRobot SEN0165 / Gravity ORP official sample (without OFFSET).
+ * ORP_raw = ((30 * Vref_mV) - (75 * voltage_mV)) / 75
+ * With Vref=5000: equivalent to 2000 - voltage_mV.
+ *
+ * @param {number} adc raw ADC count (0…1023 on Uno)
+ * @param {number} [vrefMv=5000]
+ * @param {number} [adcMax=1024] DFRobot sample uses 1024, not 1023
+ * @returns {number} ORP in mV before OFFSET
+ */
+function dfrobotOrpRaw(adc, vrefMv = DFROBOT_ORP_VREF_MV, adcMax = DFROBOT_ORP_ADC_MAX) {
+    const voltageMv = (Number(adc) * vrefMv) / adcMax;
+    return ((30 * vrefMv) - (75 * voltageMv)) / 75;
+}
+
+/**
+ * Mean OFFSET so that ORP = ORP_raw(adc) - OFFSET matches calibration points.
+ * OFFSET_i = ORP_raw(x_i) - y_i ; one point is enough.
+ *
+ * @param {Array<[number, number]>} dataPoints [adc, expected_mV][]
+ * @returns {number}
+ */
+function computeDfrobotOffset(dataPoints) {
+    let sum = 0;
+    for (const [x, y] of dataPoints) {
+        sum += dfrobotOrpRaw(x) - Number(y);
+    }
+    return sum / dataPoints.length;
 }
 
 class MQTTSensor extends Sensor {
@@ -104,6 +138,7 @@ class MQTTSensor extends Sensor {
     calibrationConfiguration(sensorConfig, addonConfig) {
         this.calibration_set = sensorConfig.calibration_set;
         this.calibration_sets = addonConfig.calibration_sets;
+        this.dfrobotOffset = undefined;
 
         if (this.calibration_set) {         // the sensor is to be scaled thanks to calibration points
             this.calibration = {};
@@ -121,7 +156,7 @@ class MQTTSensor extends Sensor {
                         // those 2 ones are for const everpolate lib
                         this.calibration.x_points.push(point.x_point);
                         this.calibration.y_points.push(point.y_point);
-                        // this one is for regression lib
+                        // this one is for regression lib / dfrobot offset
                         this.calibration.data_points.push([point.x_point, point.y_point]);
                     }
                 });
@@ -129,10 +164,46 @@ class MQTTSensor extends Sensor {
             if (!this.calibration.x_points) {
                 this.emit("error",
                     new Error('Configuration Error: You have to provide a calibration_set with points and "set" set corresponding set'));
+                return;
             }
 
-
+            if (this.calibrationType === 'dfrobot_orp') {
+                // Native DFRobot slope; OFFSET from calibration point(s). order/precision unused.
+                this.dfrobotOffset = computeDfrobotOffset(this.calibration.data_points);
+                info(`${sensorConfig.name} sensor is calibrated using DFRobot ORP formula (SEN0165 sample)`);
+                info(`dfrobot_orp: Vref=${DFROBOT_ORP_VREF_MV} mV adcMax=${DFROBOT_ORP_ADC_MAX}  OFFSET=${this.dfrobotOffset}  (from ${this.calibration.data_points.length} point(s))`);
+                info(`dfrobot_orp: calibration_order / calibration_precision are ignored for this type`);
+            }
         }
+    }
+
+    /**
+     * Convert filtered ADC to engineering units (or pass-through if no calibration).
+     * @param {number} adc
+     * @returns {number}
+     */
+    applyCalibration(adc) {
+        if (!this.calibration) {
+            return adc;
+        }
+
+        if (this.calibrationType === 'dfrobot_orp') {
+            return dfrobotOrpRaw(adc) - this.dfrobotOffset;
+        }
+
+        // linear | polynomial | exponential | logarithmic | power via regression lib
+        if (!this.regression) {
+            if (typeof regression[this.calibrationType] !== 'function') {
+                throw new Error(`Unknown calibration_type: ${this.calibrationType}`);
+            }
+            this.regression = regression[this.calibrationType](this.calibration.data_points,
+                { order: this.calibrationOrder, precision: this.calibrationPrecision });
+
+            info(`${this.sensorConfig.name} sensor is calibrated using regression  : ${this.calibrationType}`);
+            info(`${this.regression.string}`);
+            info(`r2 : ${this.regression.r2}`);
+        }
+        return this.regression.predict(adc)[1];
     }
 
     /**
@@ -303,17 +374,13 @@ class MQTTSensor extends Sensor {
         const filteredRaw = this.applySampleWindow(instantRaw);
 
         // engineering: post-window, post-calibration (or raw if no curve)
-        let calibrated = filteredRaw;
-        if (this.calibration) {
-            if (!this.regression) {
-                this.regression = regression[this.calibrationType](this.calibration.data_points,
-                    { order: this.calibrationOrder, precision: this.calibrationPrecision });
-
-                info(`${this.sensorConfig.name} sensor is calibrated using regression  : ${this.calibrationType}`);
-                info(`${this.regression.string}`);
-                info(`r2 : ${this.regression.r2}`);
-            }
-            calibrated = this.regression.predict(filteredRaw)[1];
+        let calibrated;
+        try {
+            calibrated = this.applyCalibration(filteredRaw);
+        } catch (err) {
+            console.error(err);
+            debug(`calibration error on ${this.sensorConfig.name}: ${err && err.message ? err.message : err}`);
+            return;
         }
 
         const guarded = this.applyValueGuards(calibrated);
@@ -330,16 +397,21 @@ class MQTTSensor extends Sensor {
             publishValue = calibrated;
         }
 
+        const attributes = {
+            raw_value: instantRaw,
+            filtered_raw: filteredRaw,
+            calibrated: calibrated,
+            accepted: guarded.accepted,
+            reject_reason: guarded.reason,
+            jump_streak: this.jumpRejectStreak,
+        };
+        if (this.calibrationType === 'dfrobot_orp' && this.dfrobotOffset !== undefined) {
+            attributes.dfrobot_offset = this.dfrobotOffset;
+        }
+
         const sensorData = {
             value: publishValue,
-            attributes: {
-                raw_value: instantRaw,
-                filtered_raw: filteredRaw,
-                calibrated: calibrated,
-                accepted: guarded.accepted,
-                reject_reason: guarded.reason,
-                jump_streak: this.jumpRejectStreak,
-            },
+            attributes,
         };
 
         debug(`Brut ${instantRaw} filtered_raw ${filteredRaw} on ${this.sensorConfig.name} -> ${sensorData.value}` +
@@ -356,3 +428,5 @@ class MQTTSensor extends Sensor {
 }
 
 module.exports = MQTTSensor;
+module.exports.dfrobotOrpRaw = dfrobotOrpRaw;
+module.exports.computeDfrobotOffset = computeDfrobotOffset;
