@@ -218,10 +218,31 @@ Cela dépend de `calibration_type` du **capteur** (voir plus bas) :
 | `calibration_type` | Points minimum conseillés | Remarque |
 |--------------------|---------------------------|----------|
 | `linear` | **2** | Droite ; 1 seul point est **insuffisant** (il faudrait inventer la pente). |
+| `dfrobot_orp` | **1** suffit | Formule native DFRobot SEN0165 / Gravity ORP ; seul l’**OFFSET** est calé sur le(s) point(s). |
 | `polynomial` | Au moins `calibration_order + 1` | Ex. ordre 3 → idéalement ≥ 4 points (3 peuvent « coller » mais moins robustes). |
 | `exponential`, `logarithmic`, `power` | Selon la lib de régression ; en pratique ≥ 2–3 points bien répartis | |
 
-**Exemple — redox linéaire (formule type DFRobot + offset mesuré) :**
+**Exemple — redox DFRobot (recommandé pour carte Gravity ORP / SEN0165) :**
+
+Un seul point terrain (ADC mesuré dans une solution connue, ici 650 mV) :
+
+```yaml
+calibration_sets:
+  - set: redox
+    x_point: 302    # ADC lu en solution 650 mV (votre mesure)
+    y_point: 650    # valeur vraie de la solution (mV)
+```
+
+```yaml
+sensors:
+  - name: Sonde Redox
+    pin: A4
+    unit: mv
+    calibration_set: redox
+    calibration_type: dfrobot_orp
+```
+
+**Exemple — même résultat en `linear` (ancienne méthode, 2 points) :**
 
 ```yaml
 calibration_sets:
@@ -578,8 +599,8 @@ sensors:
 
 | | |
 |--|--|
-| **Rôle** | Type de régression utilisée pour passer de `x_point` (ADC) à `y_point` (physique). |
-| **Type** | `linear` \| `polynomial` \| `exponential` \| `logarithmic` \| `power` |
+| **Rôle** | Méthode pour passer de `x_point` (ADC) à `y_point` (physique). |
+| **Type** | `linear` \| `polynomial` \| `exponential` \| `logarithmic` \| `power` \| **`dfrobot_orp`** |
 | **Obligatoire** | Non. |
 | **Défaut** | **`linear`** si `calibration_set` est défini et type omis. |
 
@@ -587,8 +608,34 @@ sensors:
 
 **Conseils :**
 
-- **linear** : 2 points, droites (redox DFRobot, nombreuses sondes 2 points).
+- **`dfrobot_orp`** : cartes **DFRobot / Gravity ORP (SEN0165)** sur Arduino **5 V / 10 bits** (Uno, etc.). **Un seul point** de calibration suffit.
+- **linear** : 2 points, droites génériques (pression, etc.).
 - **polynomial** : courbes (pH multi-points) ; régler aussi `calibration_order`.
+
+#### Détail `dfrobot_orp` (formule native DFRobot)
+
+Implémentation alignée sur le sample code DFRobot :
+
+\[
+V_{mV} = \mathrm{ADC} \times \frac{5000}{1024}
+\]
+
+\[
+\mathrm{ORP}_{raw} = \frac{30 \times 5000 - 75 \times V_{mV}}{75} = 2000 - V_{mV}
+\]
+
+\[
+\mathrm{ORP} = \mathrm{ORP}_{raw} - \mathrm{OFFSET}
+\]
+
+- **`OFFSET`** est calculé au démarrage à partir des points du `calibration_set` :  
+  pour chaque point, \(\mathrm{OFFSET}_i = \mathrm{ORP}_{raw}(x\_point) - y\_point\), puis **moyenne** si plusieurs points.
+- Avec un seul point `(302, 650)` : l’affichage vaut **exactement 650 mV** quand l’ADC vaut 302 ; la pente reste celle de DFRobot (pas une pente inventée).
+- L’attribut MQTT **`dfrobot_offset`** publie l’OFFSET utilisé (ex. ≈ `-124.61`).
+- **`calibration_order`** et **`calibration_precision`** sont **ignorés** pour ce type.
+- Hypothèse **Uno / 5 V / dénominateur 1024** (sample DFRobot). Cartes 3,3 V / 12 bits : ce mode n’est pas adapté tel quel.
+
+**Migration depuis l’ancienne calib linear à 2 points** (0 → 2124.61 et 302 → 650) : gardez **uniquement** le point réel `(302, 650)` et passez à `calibration_type: dfrobot_orp`. Résultat numérique équivalent, YAML plus simple.
 
 ---
 
@@ -604,7 +651,7 @@ sensors:
 **Piège :** un ordre **trop élevé** avec peu de points **sur-ajuste** (passe par les points mais oscille entre eux).  
 Règle pratique : nombre de points ≥ order + 1, et order modeste (2 ou 3) pour du pH.
 
-**Ignoré** pour `linear` (sauf effet collatéral de la lib si mal configuré — gardez `linear` sans vous en soucier).
+**Ignoré** pour `linear` et **`dfrobot_orp`**.
 
 ---
 
@@ -623,6 +670,8 @@ Règle pratique : nombre de points ≥ order + 1, et order modeste (2 ou 3) pour
 - la résolution de l’ADC.
 
 Augmenter (ex. `16`–`20`) peut aider sur des polynômes un peu instables numériquement.
+
+**Ignoré** pour **`dfrobot_orp`**.
 
 ---
 
@@ -755,6 +804,7 @@ Même sans companions, le payload d’état contient des attributs (peu pratique
 | `accepted` | `true` si la valeur a mis à jour le baseline de l’état principal. |
 | `reject_reason` | `null`, ou `max_jump`, `max_jump_accepted`, `below_min`, `above_max`, `nan`, … |
 | `jump_streak` | Compteur de rejets consécutifs liés à `max_jump`. |
+| `dfrobot_offset` | Présent si `calibration_type: dfrobot_orp` : OFFSET appliqué (mV). |
 
 ---
 
@@ -873,9 +923,6 @@ calibration_sets:
     x_point: 159
     y_point: 1
   - set: redox
-    x_point: 0
-    y_point: 2124.61
-  - set: redox
     x_point: 302
     y_point: 650
   - set: PH
@@ -926,9 +973,14 @@ sensors:
     unit: mv
     freq: 10000
     calibration_set: redox
-    calibration_type: linear
+    calibration_type: dfrobot_orp
     publish_raw: true
     publish_calibrated: true
+    # filter_samples: 7
+    # max_jump: 80
+    # max_jump_streak: 5
+    # value_min: 100
+    # value_max: 950
 
   - name: Sonde PH
     pin: A5
